@@ -30,6 +30,8 @@
               cudaPackages.cudatoolkit
               cudaPackages.cuda_nvcc
             ];
+            CUDA_ROOT = "${pkgs.cudaPackages.cudatoolkit}";
+            LD_LIBRARY_PATH = "/run/opengl-driver/lib";
           };
 
         }
