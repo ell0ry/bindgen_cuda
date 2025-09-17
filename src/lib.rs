@@ -4,6 +4,7 @@ use rayon::prelude::*;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
+use std::env;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -79,6 +80,14 @@ fn default_include() -> Option<Vec<PathBuf>> {
             .map(|p| p.expect("Invalid path"))
             .collect(),
     )
+}
+
+fn push_env(var: &str, roots: &mut Vec<PathBuf>) {
+    if let Some(val) = env::var_os(var) {
+        if !val.is_empty() {
+            roots.push(PathBuf::from(val));
+        }
+    }
 }
 
 impl Builder {
@@ -434,42 +443,103 @@ impl Bindings {
 }
 
 fn cuda_include_dir() -> Option<PathBuf> {
-    // NOTE: copied from cudarc build.rs.
-    let env_vars = [
+    fn push_env(var: &str, roots: &mut Vec<PathBuf>) {
+        if let Some(val) = env::var_os(var) {
+            // roots.push(PathBuf::from(val));
+            roots.insert(0, PathBuf::from(val));
+        }
+    }
+
+    // NOTE: copied from cudarc build.rs (kept as-is).
+    let env_vars: Vec<PathBuf> = [
         "CUDA_PATH",
         "CUDA_ROOT",
         "CUDA_TOOLKIT_ROOT_DIR",
         "CUDNN_LIB",
+    ]
+    .into_iter()
+    .filter_map(env::var_os)
+    .map(PathBuf::from)
+    .collect();
+
+    // Start with your static roots, then push env-provided ones.
+    let mut roots: Vec<PathBuf> = vec![
+        PathBuf::from("/usr"),
+        PathBuf::from("/usr/local/cuda"),
+        PathBuf::from("/opt/cuda"),
+        PathBuf::from("/usr/lib/cuda"),
+        PathBuf::from("C:/Program Files/NVIDIA GPU Computing Toolkit"),
+        PathBuf::from("C:/CUDA"),
     ];
-    #[allow(unused)]
-    let env_vars = env_vars
-        .into_iter()
-        .map(std::env::var)
-        .filter_map(Result::ok)
-        .map(Into::<PathBuf>::into);
 
-    let roots = [
-        "/usr",
-        "/usr/local/cuda",
-        "/opt/cuda",
-        "/usr/lib/cuda",
-        "C:/Program Files/NVIDIA GPU Computing Toolkit",
-        "C:/CUDA",
-    ];
+    // Add env vars for pixi if present
+    push_env("PIXI_PATH", &mut roots);
+    push_env("PIXI_CUDA", &mut roots);
 
-    println!("cargo:info={roots:?}");
-
-    #[allow(unused)]
-    let roots = roots.into_iter().map(Into::<PathBuf>::into);
+    println!("cargo:info={:?}", roots);
 
     #[cfg(feature = "ci-check")]
-    let root: PathBuf = "ci".into();
+    {
+        let root: PathBuf = "ci".into();
+        return Some(root);
+    }
 
     #[cfg(not(feature = "ci-check"))]
-    env_vars
-        .chain(roots)
-        .find(|path| path.join("include").join("cuda.h").is_file())
+    {
+        env_vars
+            .into_iter()
+            .chain(roots.into_iter())
+            .find(|path| path.join("include").join("cuda.h").is_file())
+    }
 }
+
+// fn cuda_include_dir() -> Option<PathBuf> {
+//     // NOTE: copied from cudarc build.rs.
+//     let env_vars = [
+//         "CUDA_PATH",
+//         "CUDA_ROOT",
+//         "CUDA_TOOLKIT_ROOT_DIR",
+//         "CUDNN_LIB",
+//     ];
+//     #[allow(unused)]
+//     let env_vars = env_vars
+//         .into_iter()
+//         .map(std::env::var)
+//         .filter_map(Result::ok)
+//         .map(Into::<PathBuf>::into);
+
+//     let roots = [
+//         "/usr",
+//         "/usr/local/cuda",
+//         "/opt/cuda",
+//         "/usr/lib/cuda",
+//         "C:/Program Files/NVIDIA GPU Computing Toolkit",
+//         "C:/CUDA",
+//     ];
+
+//         // "/home/sb000814local/mistral.rs/.pixi/envs/gpu",
+//         // "/home/sb000814local/mistral.rs/.pixi/envs/gpu/targets/x86_64-linux",
+//     println!("cargo:info={roots:?}");
+
+//     #[allow(unused)]
+//     let roots = roots.into_iter().map(Into::<PathBuf>::into);
+
+
+//     // let env_vars_test = env_vars
+//     //     .map(std::env::var);
+
+//     // let test = env_vars.chain(roots);
+//     println!("env vars: {env_vars:?}");
+//     println!("roots: {roots:?}");
+
+//     #[cfg(feature = "ci-check")]
+//     let root: PathBuf = "ci".into();
+
+//     #[cfg(not(feature = "ci-check"))]
+//     env_vars
+//         .chain(roots)
+//         .find(|path| path.join("include").join("cuda.h").is_file())
+// }
 
 fn compute_cap() -> Result<usize, Error> {
     println!("cargo:rerun-if-env-changed=CUDA_COMPUTE_CAP");
